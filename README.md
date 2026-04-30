@@ -1,57 +1,58 @@
-# Find-WebLinks **Version 1.5**
+# Find-WebLinks
 
-Find-WebLinks is a PowerShell command-line tool for extracting links from web pages or from large text files containing many URLs.
+Find-WebLinks is a PowerShell command-line tool for extracting web links from a single web page or from a text file containing many URLs.
 
-It is designed for long-running link discovery jobs where you need filtering, deduplication, blacklist handling, logging, failure tracking, resume support, and optional file maintenance without needing a browser, Selenium, Playwright, or external PowerShell modules.
+It is designed for link discovery, archive preparation, download-list building, and long-running URL processing jobs where you need filtering, deduplication, blacklist handling, logging, failed-URL tracking, resume support, parallel processing, and optional file maintenance.
 
-The script downloads the raw HTTP response and extracts URLs from common places such as HTML attributes, raw text, script blocks, JSON-like content, CSS `url(...)` references, `noscript` sections, and related embedded link patterns. It does **not** execute JavaScript or render pages like a real browser.
+The script does **not** require a browser, Selenium, Playwright, ChromeDriver, or external PowerShell modules. It downloads the raw HTTP response and extracts links from common locations such as HTML attributes, raw text, script blocks, JSON-like content, CSS `url(...)` references, `noscript` blocks, and embedded URL patterns.
 
----
-
-## Main capabilities in version 1.5
-
-Version 1.5 is a major expansion from the older 1.1 README. It adds safer long-run behaviour, better filtering, resume support, parallel processing, standalone maintenance commands, and command-line overrides for operational limits.
-
-Key capabilities:
-
-- Scan one URL or a file containing many URLs.
-- Extract links from raw HTTP responses without a browser.
-- Match links using one wildcard pattern or multiple wildcard patterns.
-- Use `Any` or `All` logic for search patterns.
-- Exclude links using one or more wildcard patterns.
-- Use `Any` or `All` logic for exclusion patterns.
-- Write matching links to an output text file.
-- Append to or recreate the main output file.
-- Skip duplicates already present in the output file.
-- Optionally keep duplicates found within the same page.
-- Use one or more blacklist files.
-- Apply blacklist files to input URLs, extracted output links, or both.
-- Resume interrupted file-mode runs using a progress file.
-- Detect changed run settings before resuming.
-- Retry failed requests.
-- Honour HTTP/meta-refresh redirect limits.
-- Optionally fetch each URL twice and keep the larger response.
-- Log per-URL processing statistics to CSV.
-- Save failed URLs to a separate tab-separated file.
-- Use independent append/new modes for output, CSV log, and failed URL files.
-- Run deduplication and sorting before or after scraping.
-- Run standalone maintenance commands without downloading anything.
-- Process URL lists in parallel with PowerShell 7+.
-- Use a custom User-Agent.
-- Use an HTTP proxy.
-- Override page-size, regex, redirect, retry, file-write, and maintenance limits from the command line.
-- Warn on high failure rates during large file-mode jobs.
-- Refuse dangerous file collisions, such as output file matching source, log, blacklist, failed URL, or progress file.
-- Avoid accidental huge in-memory maintenance operations unless explicitly allowed.
+It is a raw-response extraction tool, not a browser. It does **not** execute JavaScript or render web pages.
 
 ---
 
 ## Requirements
 
 - Windows PowerShell 5.1 or PowerShell 7+.
-- PowerShell 7+ is required only for parallel mode with `-ThrottleLimit` greater than `1`.
+- PowerShell 7+ is required only when using parallel processing with `-ThrottleLimit` greater than `1`.
 - No external PowerShell modules required.
 - No browser required.
+
+---
+
+## Main capabilities
+
+Find-WebLinks can:
+
+- Scan one URL.
+- Scan many URLs from a text file.
+- Extract links from raw HTTP responses.
+- Match links using one wildcard pattern or multiple wildcard patterns.
+- Use `Any` or `All` matching logic for include patterns.
+- Exclude links using one or more wildcard patterns.
+- Use `Any` or `All` matching logic for exclusion patterns.
+- Write matching links to a plain text output file.
+- Append to an existing output file or create a fresh output file.
+- Avoid writing duplicate links already present in the output file.
+- Optionally keep duplicate matches found within the same page.
+- Preserve or ignore URL fragments during deduplication.
+- Use one or more exact-URL blacklist files.
+- Apply blacklists to input URLs, output links, or both.
+- Resume interrupted file-mode runs using a progress file.
+- Detect changed run settings before resuming.
+- Retry failed requests.
+- Honour HTTP and meta-refresh redirect limits.
+- Optionally fetch a page twice and keep the larger response.
+- Use a custom User-Agent.
+- Use an HTTP proxy.
+- Log per-URL processing statistics to CSV.
+- Save failed source URLs to a separate tab-separated file.
+- Use independent append/new modes for output, CSV log, and failed URL files.
+- Process URL lists sequentially or in parallel.
+- Deduplicate and sort files before or after a scraping run.
+- Run standalone maintenance commands without fetching URLs.
+- Protect against dangerous file collisions.
+- Warn when failure rates are high.
+- Expose operational limits as command-line parameters instead of hardcoded values.
 
 ---
 
@@ -61,23 +62,27 @@ Key capabilities:
 .\Find-WebLinks.ps1 "PAGE_OR_FILE" "WHAT_TO_FIND" "OUTPUT_FILE" [Append|New] [Url|File]
 ```
 
-Examples:
+Search one web page:
 
 ```powershell
 .\Find-WebLinks.ps1 "https://www.bbc.co.uk/news" "*sport*" "bbc-links.txt" New Url
 ```
 
+Search many pages from a file:
+
 ```powershell
 .\Find-WebLinks.ps1 "urls.txt" "*download*" "matched-links.txt" Append File
 ```
 
-The `*` wildcard means “anything”. For example:
+The `*` wildcard means “anything”.
+
+Examples:
 
 ```text
-*news*        matches links containing news
-*download*    matches links containing download
-*bbc*weather* matches links containing bbc, then weather later in the link
-*             matches everything
+*news*          matches links containing news
+*download*      matches links containing download
+*bbc*weather*   matches links containing bbc, then weather later in the link
+*               matches everything
 ```
 
 ---
@@ -91,38 +96,40 @@ Find-WebLinks has two source modes.
 | `Url` | `Source` is a single web page URL. |
 | `File` | `Source` is a text file containing URLs, one per line. |
 
-Single URL:
+Single URL mode:
 
 ```powershell
 .\Find-WebLinks.ps1 "https://www.bbc.co.uk/news" "*sport*" "links.txt" New Url
 ```
 
-Many URLs from a file:
+File mode:
 
 ```powershell
 .\Find-WebLinks.ps1 "urls.txt" "*sport*" "links.txt" New File
 ```
 
-In `File` mode, results are written after each page, so useful partial output is kept even during long jobs.
+In `File` mode, results are written after each processed page, so long runs keep useful partial output even if interrupted.
+
+Source files may contain blank lines and comments. Blank lines are ignored. Lines starting with `#` are ignored.
 
 ---
 
 ## Output modes
 
-The main output file supports two modes:
+The main output file supports two modes.
 
 | Mode | Meaning |
 |---|---|
 | `Append` | Add new results to the end of the existing file. This is the default. |
 | `New` | Create or overwrite the output file before writing results. |
 
-Example using `New`:
+Create a fresh output file:
 
 ```powershell
 .\Find-WebLinks.ps1 "urls.txt" "*news*" "matched-links.txt" New File
 ```
 
-Example using `Append`:
+Append to an existing file:
 
 ```powershell
 .\Find-WebLinks.ps1 "urls.txt" "*news*" "matched-links.txt" Append File
@@ -130,9 +137,15 @@ Example using `Append`:
 
 ---
 
-## Multiple search patterns
+## Search patterns
 
-Version 1.5 supports multiple include patterns through `-SearchPatterns`.
+You can use a single positional search pattern:
+
+```powershell
+.\Find-WebLinks.ps1 "urls.txt" "*download*" "matched.txt" Append File
+```
+
+You can also provide multiple search patterns with `-SearchPatterns`.
 
 Match links containing `news`, `sport`, or `weather`:
 
@@ -154,11 +167,18 @@ You can also use `-SearchPatterns` without the positional `SearchPattern`:
 .\Find-WebLinks.ps1 "https://www.bbc.co.uk" -SearchPatterns "*news*","*sport*" -OutputFile "out.txt"
 ```
 
+### Search mode
+
+| SearchMode | Meaning |
+|---|---|
+| `Any` | A link is accepted when it matches at least one search pattern. This is the default. |
+| `All` | A link is accepted only when it matches every search pattern. |
+
 ---
 
 ## Excluding unwanted links
 
-Version 1.5 supports exclusion patterns.
+Use `-ExcludePattern` or `-ExcludePatterns` to remove links you do not want from the matched output.
 
 Save links containing `download` or `game`, but exclude links containing `demo` or `trailer`:
 
@@ -178,7 +198,14 @@ Exclude only when **all** exclude patterns match the same link:
 .\Find-WebLinks.ps1 "urls.txt" "*download*" "matched.txt" Append File -ExcludePatterns "*demo*","*trial*" -ExcludeMode All
 ```
 
-Exclusion statistics are included in the CSV log.
+### Exclude mode
+
+| ExcludeMode | Meaning |
+|---|---|
+| `Any` | A link is excluded when it matches at least one exclude pattern. This is the default. |
+| `All` | A link is excluded only when it matches every exclude pattern. |
+
+Exclusion counts are included in the CSV log.
 
 ---
 
@@ -186,9 +213,9 @@ Exclusion statistics are included in the CSV log.
 
 File-mode runs can be resumed with `-Resume`.
 
-When running in `File` mode, the script writes completed source URLs to a progress file. If the run is interrupted, rerun the same command with `-Resume` to skip URLs that were already processed.
+When running in `File` mode, the script writes completed source URLs to a progress file. If a run is interrupted, run the same command again with `-Resume` to skip source URLs that were already processed.
 
-Example first run:
+First run:
 
 ```powershell
 .\Find-WebLinks.ps1 "urls.txt" "*zip*" "matched-links.txt" Append File -LogCsv "run-log.csv" -FailedUrlFile "failed-urls.txt"
@@ -212,7 +239,7 @@ For example:
 matched-links.txt.progress
 ```
 
-You can set it manually:
+You can set the progress file manually:
 
 ```powershell
 .\Find-WebLinks.ps1 "urls.txt" "*zip*" "matched-links.txt" Append File -ProgressFile "my-run.progress" -Resume
@@ -221,9 +248,9 @@ You can set it manually:
 Important resume behaviour:
 
 - `-Resume` only applies to `SourceType File`.
-- If a progress file exists and you do **not** use `-Resume`, the script refuses to start. This avoids accidentally overwriting or mixing an interrupted run.
+- If a progress file exists and you do **not** use `-Resume`, the script refuses to start. This helps prevent accidental mixing of old and new runs.
 - `-Resume` forces `Mode`, `LogMode`, and `FailedUrlMode` to `Append` to prevent data loss.
-- Failed URLs are also marked as processed. They are written to `-FailedUrlFile` if supplied.
+- Failed source URLs are also marked as processed. They are written to `-FailedUrlFile` if supplied.
 - The progress file includes a run signature so the script can detect changed search, exclude, output, blacklist, duplicate, and related settings.
 
 ---
@@ -248,7 +275,7 @@ The script automatically creates the CSV header for new or empty files. If an ex
 
 ### Failed URL file
 
-Use `-FailedUrlFile` to save URLs that failed to load.
+Use `-FailedUrlFile` to save source URLs that failed to load.
 
 ```powershell
 .\Find-WebLinks.ps1 "urls.txt" "*news*" "matched-links.txt" Append File -FailedUrlFile "failed.txt"
@@ -262,7 +289,7 @@ SourceUrl    Error
 
 ### Independent file modes
 
-The main output file, CSV log, and failed URL file can each use their own mode:
+The main output file, CSV log, and failed URL file can each use their own mode.
 
 ```powershell
 .\Find-WebLinks.ps1 "urls.txt" "*news*" "matched.txt" Append File -LogCsv "run-log.csv" -LogMode New -FailedUrlFile "failed.txt" -FailedUrlMode New
@@ -315,17 +342,19 @@ Use `-BlacklistScope` to control where the blacklist applies.
 | `Output` | Remove matching extracted links from the final output. |
 | `Both` | Apply both behaviours. This is the default. |
 
-Examples:
+Apply the blacklist only to source URLs:
 
 ```powershell
 .\Find-WebLinks.ps1 "urls.txt" "*" "out.txt" Append File -BlacklistFile "blocked.txt" -BlacklistScope Input
 ```
 
+Apply the blacklist only to extracted output links:
+
 ```powershell
 .\Find-WebLinks.ps1 "urls.txt" "*" "out.txt" Append File -BlacklistFile "blocked.txt" -BlacklistScope Output
 ```
 
-Multiple blacklist files are supported:
+Use multiple blacklist files:
 
 ```powershell
 .\Find-WebLinks.ps1 "urls.txt" "*" "out.txt" Append File -BlacklistFile "ads.txt","tracking.txt"
@@ -375,24 +404,30 @@ Default network behaviour:
 | `-DelaySeconds` | `5` | Seconds to wait between different URLs in `File` mode. |
 | `-SecondFetch` | `$true` | Fetch each URL twice and keep the larger response. |
 | `-SecondFetchWait` | `5` | Seconds to wait before the second fetch. |
-| `-MaxRedirects` | `10` | Maximum HTTP/meta-refresh redirects. |
+| `-MaxRedirects` | `10` | Maximum HTTP and meta-refresh redirects. |
 | `-MaxRetryAfterSeconds` | `300` | Maximum server `Retry-After` wait honoured. `0` means ignore. |
 | `-UserAgent` | Chrome-like UA | Custom User-Agent string. |
 | `-Proxy` | none | HTTP proxy URL. |
 
-Examples:
+Increase retries:
 
 ```powershell
 .\Find-WebLinks.ps1 "urls.txt" "*news*" "matched-links.txt" Append File -RetryCount 5 -WaitSeconds 60
 ```
 
+Fetch each page only once:
+
 ```powershell
 .\Find-WebLinks.ps1 "urls.txt" "*news*" "matched-links.txt" Append File -SecondFetch:$false
 ```
 
+Use a custom User-Agent:
+
 ```powershell
 .\Find-WebLinks.ps1 "urls.txt" "*news*" "matched-links.txt" Append File -UserAgent "MyLinkScanner/1.0"
 ```
+
+Use an HTTP proxy:
 
 ```powershell
 .\Find-WebLinks.ps1 "urls.txt" "*news*" "matched-links.txt" Append File -Proxy "http://proxy:8080"
@@ -408,18 +443,19 @@ Use `-ThrottleLimit` to process multiple source URLs in parallel.
 .\Find-WebLinks.ps1 "urls.txt" "*download*" "matched.txt" Append File -ThrottleLimit 8
 ```
 
-Important:
+Important behaviour:
 
 - Parallel mode requires PowerShell 7 or later.
 - `-ThrottleLimit` greater than `1` is only useful in `SourceType File` mode.
-- Worker threads fetch and extract links. The parent process handles filtering, writing, logging, and progress centrally to reduce file-lock races.
-- Default is `1`, which means sequential processing.
+- Worker runspaces fetch pages and extract links.
+- The parent process handles filtering, writing, logging, and progress centrally to reduce file-lock races.
+- The default is `1`, which means sequential processing.
 
 ---
 
-## File maintenance during a normal run
+## Maintenance during a normal run
 
-Version 1.5 can deduplicate and sort involved files before or after a scraping run.
+Find-WebLinks can deduplicate and sort involved files before or after a scraping run.
 
 | Option | Default | Meaning |
 |---|---:|---|
@@ -429,13 +465,13 @@ Version 1.5 can deduplicate and sort involved files before or after a scraping r
 | `-DeduplicateFiles` | off | Legacy switch. Maps to start deduplication if `-DeduplicateWhen` is not set. |
 | `-SortOutput` | `$false` | Legacy switch. Sorts output after the run, preserving older behaviour. |
 
-Example:
+Deduplicate before scraping and sort at the end:
 
 ```powershell
 .\Find-WebLinks.ps1 ".\urls.txt" "*zip*" ".\matches.txt" Append File -DeduplicateWhen Start -SortWhen End
 ```
 
-This can be useful when working with large input/output/blacklist files that may already contain repeated entries.
+This is useful when working with input, output, or blacklist files that may already contain repeated entries.
 
 ---
 
@@ -463,19 +499,21 @@ Deduplicate and/or sort using `Maintain`:
 
 In standalone maintenance mode, `Start`, `End`, and `Both` collapse to a single maintenance pass because there is no scraping phase between them.
 
+`-Files` also has the alias `-MaintenanceFiles`.
+
 ---
 
 ## Large-file maintenance safety limit
 
-By default, in-memory maintenance operations such as deduplication and sorting are protected by a 1 GB limit.
-
-This avoids accidentally loading very large files into memory.
+In-memory maintenance operations such as deduplication and sorting are protected by a default 1 GB limit.
 
 Default:
 
 ```text
 -MaintenanceLargeFileLimitMB 1024
 ```
+
+This avoids accidentally loading very large files into memory.
 
 Disable the limit for a controlled run:
 
@@ -495,7 +533,7 @@ Use this carefully. Sorting or deduplicating very large files can consume a lot 
 
 ## Operational limit overrides
 
-Version 1.5 exposes operational limits as command-line options instead of leaving them hardcoded.
+Find-WebLinks exposes operational limits as command-line options.
 
 | Option | Default | Meaning |
 |---|---:|---|
@@ -515,19 +553,19 @@ Version 1.5 exposes operational limits as command-line options instead of leavin
 | `-HighFailureRatePercent` | `50` | Warn when file-mode failures reach this percentage. `0` disables the warning. |
 | `-AllowExtremeOperationalValues` | off | Allow values above typo guardrails. |
 
-Example: allow larger pages:
+Allow larger pages:
 
 ```powershell
 .\Find-WebLinks.ps1 "urls.txt" "*download*" "matched.txt" Append File -MaxPageContentMB 250
 ```
 
-Example: disable regex timeout for a controlled local test:
+Disable regex timeout for a controlled local test:
 
 ```powershell
 .\Find-WebLinks.ps1 "urls.txt" "*download*" "matched.txt" Append File -RegexTimeoutSeconds 0
 ```
 
-Example: increase file-write retry behaviour:
+Increase file-write retry behaviour:
 
 ```powershell
 .\Find-WebLinks.ps1 "urls.txt" "*download*" "matched.txt" Append File -FileWriteRetryCount 10 -FileWriteRetryDelayMinMs 100 -FileWriteRetryDelayMaxMs 1000
@@ -537,21 +575,21 @@ Example: increase file-write retry behaviour:
 
 ## Typo guardrails for extreme values
 
-Many numeric parameters accept very large values so advanced users can intentionally override limits. To prevent accidental mistakes, version 1.5 also applies normal safety guardrails.
+Many numeric parameters accept very large values so advanced users can intentionally override limits. To prevent accidental mistakes, Find-WebLinks applies normal safety guardrails.
 
-For example, this is probably a typo:
+This is probably a typo:
 
 ```powershell
 .\Find-WebLinks.ps1 "urls.txt" "*download*" "matched.txt" Append File -RetryCount 100000
 ```
 
-By default, the script rejects values above normal guardrails and tells you to rerun with:
+By default, values above normal guardrails are rejected. To intentionally allow them, add:
 
 ```powershell
 -AllowExtremeOperationalValues
 ```
 
-Example intentional extreme run:
+Intentional extreme run:
 
 ```powershell
 .\Find-WebLinks.ps1 "urls.txt" "*download*" "matched.txt" Append File -RetryCount 100000 -AllowExtremeOperationalValues
@@ -585,9 +623,9 @@ These are typo guardrails, not hard technical ceilings.
 
 ## File collision protection
 
-The script refuses to run when important files would collide with each other.
+Find-WebLinks refuses to run when important files would collide with each other.
 
-It checks for dangerous combinations involving:
+It checks dangerous combinations involving:
 
 - Source file.
 - Output file.
@@ -714,7 +752,7 @@ Run:
 | `-SortWhen` | `None` | `None`, `Start`, `End`, or `Both`. |
 | `-UserAgent` | Chrome-like UA | Custom User-Agent header. |
 | `-LogCsv` | none | CSV file for per-URL processing statistics. |
-| `-FailedUrlFile` | none | Tab-separated file for failed URLs and errors. |
+| `-FailedUrlFile` | none | Tab-separated file for failed source URLs and errors. |
 | `-LogMode` | `Append` | `Append` or `New` for the CSV log. |
 | `-FailedUrlMode` | `Append` | `Append` or `New` for the failed URL file. |
 | `-MaintenanceLargeFileLimitMB` | `1024` | Max MB for in-memory maintenance. `0` means no limit. |
@@ -746,7 +784,7 @@ failed.txt                     Failed source URLs and errors
 matched-links.txt.progress     Resume progress file
 ```
 
-You can open `.txt` files with a text editor and `.csv` files with Excel or similar tools.
+You can open `.txt` files with any text editor. You can open `.csv` files with Excel, LibreOffice, Numbers, or similar tools.
 
 ---
 
@@ -766,7 +804,7 @@ Then run the script again.
 
 This usually means a previous file-mode run was interrupted.
 
-Use one of these options:
+Use:
 
 ```powershell
 -Resume
@@ -799,15 +837,15 @@ Try a broader search:
 .\Find-WebLinks.ps1 "https://www.bbc.co.uk/news" "*" "all-links.txt" New Url -LogCsv "run-log.csv"
 ```
 
-### The script finds fewer links than the browser
+### The script finds fewer links than a browser
 
 That is expected on modern sites that rely on JavaScript. Find-WebLinks does not execute JavaScript, click buttons, scroll pages, accept cookie banners, or wait for React, Vue, Angular, or other client-side frameworks to build the page.
 
 ### Maintenance skipped a huge file
 
-By default, maintenance operations such as deduplication and sorting are protected by a 1 GB safety limit.
+Maintenance operations such as deduplication and sorting are protected by a default 1 GB safety limit.
 
-To override it:
+Override it with:
 
 ```powershell
 -MaintenanceLargeFileLimitMB 0
