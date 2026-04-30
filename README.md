@@ -1,10 +1,10 @@
 # Find-WebLinks
 
-Find-WebLinks is a PowerShell command-line tool for extracting web links from a single web page or from a text file containing many URLs.
+Find-WebLinks is a PowerShell command-line tool for extracting web links from either a single web page or a text file containing many source URLs.
 
-It is designed for link discovery, archive preparation, download-list building, and long-running URL processing jobs where you need filtering, deduplication, blacklist handling, logging, failed-URL tracking, resume support, parallel processing, and optional file maintenance.
+It is built for link discovery, archive preparation, download-list building, deduplication, filtering, blacklist handling, long-running URL jobs, resume-safe processing, logging, failed-URL tracking, optional parallel processing, and maintenance of large text lists.
 
-The script does **not** require a browser, Selenium, Playwright, ChromeDriver, or external PowerShell modules. It downloads the raw HTTP response and extracts links from common locations such as HTML attributes, raw text, script blocks, JSON-like content, CSS `url(...)` references, `noscript` blocks, and embedded URL patterns.
+The script does **not** require a browser, Selenium, Playwright, ChromeDriver, or external PowerShell modules. It downloads the raw HTTP response and extracts links from common places such as HTML attributes, raw text, script blocks, JSON-like content, CSS `url(...)` references, `noscript` blocks, and embedded URL patterns.
 
 It is a raw-response extraction tool, not a browser. It does **not** execute JavaScript or render web pages.
 
@@ -53,6 +53,78 @@ Find-WebLinks can:
 - Protect against dangerous file collisions.
 - Warn when failure rates are high.
 - Expose operational limits as command-line parameters instead of hardcoded values.
+- Show built-in help with `-Help` or `-h`.
+- Start a guided interactive command builder with `-InteractiveHelp` or `-Interactive`.
+- When started without parameters, ask whether to show help, open the guided command builder, or exit.
+
+---
+
+## Help and guided command builder
+
+Find-WebLinks includes two help modes.
+
+### Show normal help
+
+```powershell
+.\Find-WebLinks.ps1 -Help
+```
+
+Short alias:
+
+```powershell
+.\Find-WebLinks.ps1 -h
+```
+
+### Start the guided command builder
+
+```powershell
+.\Find-WebLinks.ps1 -InteractiveHelp
+```
+
+Alias:
+
+```powershell
+.\Find-WebLinks.ps1 -Interactive
+```
+
+The guided command builder asks questions and then prints the PowerShell command you should run. It does **not** fetch URLs, write files, deduplicate files, sort files, or execute the generated command.
+
+It can build commands for:
+
+- normal scraping runs;
+- single-URL source mode;
+- file-of-URLs source mode;
+- wildcard include patterns;
+- wildcard exclude patterns;
+- `Any` / `All` matching behaviour;
+- output file and output mode;
+- resume mode and progress files;
+- blacklist files and blacklist scope;
+- CSV logging;
+- failed URL tracking;
+- retry, timeout, proxy, redirect, and User-Agent settings;
+- duplicate handling;
+- sorting and deduplication during a run;
+- operational safety limits;
+- standalone maintenance commands.
+
+### Behaviour when started without parameters
+
+If you run the script without any parameters:
+
+```powershell
+.\Find-WebLinks.ps1
+```
+
+it asks what you want to do:
+
+```text
+Show help
+Interactive command builder
+Exit
+```
+
+Choose **Show help** to print the normal usage help. Choose **Interactive command builder** to answer questions and generate a command string.
 
 ---
 
@@ -192,7 +264,7 @@ Save links containing both `amiga` and `lha`, but exclude anything containing `b
 .\Find-WebLinks.ps1 "urls.txt" -SearchPatterns "*amiga*","*lha*" -SearchMode All -ExcludePattern "*beta*" -OutputFile "matched.txt" Append File
 ```
 
-Exclude only when **all** exclude patterns match the same link:
+Exclude only when all exclude patterns match the same link:
 
 ```powershell
 .\Find-WebLinks.ps1 "urls.txt" "*download*" "matched.txt" Append File -ExcludePatterns "*demo*","*trial*" -ExcludeMode All
@@ -326,7 +398,7 @@ Blacklist matching is exact after normalisation. A blacklist entry such as:
 https://facebook.com
 ```
 
-will **not** automatically block:
+will not automatically block:
 
 ```text
 https://facebook.com/some/page
@@ -408,6 +480,7 @@ Default network behaviour:
 | `-MaxRetryAfterSeconds` | `300` | Maximum server `Retry-After` wait honoured. `0` means ignore. |
 | `-UserAgent` | Chrome-like UA | Custom User-Agent string. |
 | `-Proxy` | none | HTTP proxy URL. |
+| `-ConnectionLimit` | `100` | .NET HTTP connection limit. |
 
 Increase retries:
 
@@ -575,7 +648,7 @@ Increase file-write retry behaviour:
 
 ## Typo guardrails for extreme values
 
-Many numeric parameters accept very large values so advanced users can intentionally override limits. To prevent accidental mistakes, Find-WebLinks applies normal safety guardrails.
+Many numeric parameters accept very large values so advanced users can intentionally override limits.
 
 This is probably a typo:
 
@@ -583,7 +656,9 @@ This is probably a typo:
 .\Find-WebLinks.ps1 "urls.txt" "*download*" "matched.txt" Append File -RetryCount 100000
 ```
 
-By default, values above normal guardrails are rejected. To intentionally allow them, add:
+By default, values above normal guardrails are rejected.
+
+To intentionally allow them, add:
 
 ```powershell
 -AllowExtremeOperationalValues
@@ -623,9 +698,7 @@ These are typo guardrails, not hard technical ceilings.
 
 ## File collision protection
 
-Find-WebLinks refuses to run when important files would collide with each other.
-
-It checks dangerous combinations involving:
+Find-WebLinks refuses to run when important files would collide with each other. It checks dangerous combinations involving:
 
 - Source file.
 - Output file.
@@ -647,6 +720,18 @@ This is intentional. It prevents accidental data loss.
 ---
 
 ## Common examples
+
+### Show help
+
+```powershell
+.\Find-WebLinks.ps1 -Help
+```
+
+### Build a command interactively
+
+```powershell
+.\Find-WebLinks.ps1 -InteractiveHelp
+```
 
 ### Search one page and create a new output file
 
@@ -718,6 +803,8 @@ Run:
 
 | Option | Default | Description |
 |---|---:|---|
+| `-Help` / `-h` | off | Show built-in help and exit. |
+| `-InteractiveHelp` / `-Interactive` | off | Start the guided command builder and exit. |
 | `Source` | none | URL or file path to process. |
 | `SearchPattern` | none | Main wildcard pattern. Optional if `-SearchPatterns` is used. |
 | `-SearchPatterns` | none | One or more wildcard patterns. |
@@ -746,7 +833,7 @@ Run:
 | `-Proxy` | none | HTTP proxy URL. |
 | `-SortOutput` | `$false` | Legacy end-of-run output sorting switch. |
 | `-Command` | `Run` | `Run`, `Deduplicate`, `Sort`, or `Maintain`. |
-| `-Files` | none | Files for standalone maintenance commands. Alias: `-MaintenanceFiles`. |
+| `-Files` / `-MaintenanceFiles` | none | Files for standalone maintenance commands. |
 | `-SortDirection` | `Ascending` | `Ascending` or `Descending`. |
 | `-DeduplicateWhen` | `None` | `None`, `Start`, `End`, or `Both`. |
 | `-SortWhen` | `None` | `None`, `Start`, `End`, or `Both`. |
@@ -778,10 +865,10 @@ Run:
 Depending on the options used, the script may create:
 
 ```text
-matched-links.txt              Matched links
-run-log.csv                    Per-URL processing log
-failed.txt                     Failed source URLs and errors
-matched-links.txt.progress     Resume progress file
+matched-links.txt           Matched links
+run-log.csv                 Per-URL processing log
+failed.txt                  Failed source URLs and errors
+matched-links.txt.progress  Resume progress file
 ```
 
 You can open `.txt` files with any text editor. You can open `.csv` files with Excel, LibreOffice, Numbers, or similar tools.
@@ -799,6 +886,16 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 ```
 
 Then run the script again.
+
+### I do not know which command to run
+
+Use the guided command builder:
+
+```powershell
+.\Find-WebLinks.ps1 -InteractiveHelp
+```
+
+It will ask questions and print a command string. It will not run the command automatically.
 
 ### A progress file already exists
 
@@ -873,9 +970,7 @@ If you are on Windows PowerShell 5.1, use the default sequential mode or install
 
 ## Limitations
 
-Find-WebLinks is a best-effort raw-response link extraction tool.
-
-It does **not**:
+Find-WebLinks is a best-effort raw-response link extraction tool. It does **not**:
 
 - Execute JavaScript.
 - Render pages.
@@ -893,9 +988,9 @@ If a link only appears after browser-side JavaScript runs, this script may not s
 
 ## Responsible use
 
-Use this tool responsibly.
+Use this tool responsibly. Respect website terms of service, robots.txt guidance where applicable, rate limits, copyright restrictions, and access controls.
 
-Respect website terms of service, robots.txt guidance where applicable, rate limits, copyright restrictions, and access controls. Do not use it to overload websites or collect data you are not allowed to access.
+Do not use it to overload websites or collect data you are not allowed to access.
 
 ---
 
