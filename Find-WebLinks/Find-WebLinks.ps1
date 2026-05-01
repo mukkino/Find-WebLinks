@@ -1,6 +1,6 @@
 #requires -Version 5.1
 
-# Find-WebLinks.ps1 - 1.6.1
+# Find-WebLinks.ps1 - 1.6.2
 # Author: Fabio Lichinchi (mukka)
 # 
 # THE UNLICENSE
@@ -1338,6 +1338,69 @@ function Dispose-BaseResponseSafe {
     }
 }
 
+function Test-IsCancellationException {
+    param([AllowNull()][object]$ErrorObject)
+
+    if ($null -eq $ErrorObject) { return $false }
+
+    $ex = if ($ErrorObject -is [System.Management.Automation.ErrorRecord]) {
+        $ErrorObject.Exception
+    }
+    elseif ($ErrorObject.PSObject.Properties['Exception']) {
+        $ErrorObject.Exception
+    }
+    else {
+        $ErrorObject
+    }
+
+    while ($null -ne $ex) {
+        $typeName = $ex.GetType().FullName
+
+        if (
+            $ex -is [System.Management.Automation.PipelineStoppedException] -or
+            $ex -is [System.OperationCanceledException] -or
+            $typeName -eq 'System.Threading.Tasks.TaskCanceledException' -or
+            $typeName -eq 'System.Threading.ThreadInterruptedException' -or
+            $typeName -eq 'System.Threading.ThreadAbortException'
+        ) {
+            return $true
+        }
+
+        $ex = $ex.InnerException
+    }
+
+    return $false
+}
+
+function Test-IsInvalidWebRequestStateError {
+    param([AllowNull()][object]$ErrorObject)
+
+    if ($null -eq $ErrorObject) { return $false }
+
+    $ex = if ($ErrorObject -is [System.Management.Automation.ErrorRecord]) {
+        $ErrorObject.Exception
+    }
+    elseif ($ErrorObject.PSObject.Properties['Exception']) {
+        $ErrorObject.Exception
+    }
+    else {
+        $ErrorObject
+    }
+
+    while ($null -ne $ex) {
+        if (
+            $ex -is [System.InvalidOperationException] -and
+            $ex.Message -match 'current state of the object'
+        ) {
+            return $true
+        }
+
+        $ex = $ex.InnerException
+    }
+
+    return $false
+}
+
 function Convert-WildcardToRegex {
     param([string]$Pattern)
 
@@ -2336,7 +2399,6 @@ function Invoke-WebRequestWithRetry {
     if ($Url -notmatch '^https?://') { $Url = "https://$Url" }
 
     $session  = New-Object Microsoft.PowerShell.Commands.WebRequestSession
-    $session.UserAgent = $UserAgent
     if ($Proxy) {
         $proxyObj = [System.Net.WebProxy]::new($Proxy)
         $proxyUri = [uri]$Proxy
@@ -2355,7 +2417,6 @@ function Invoke-WebRequestWithRetry {
     $headers = @{
         "Accept"           = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
         "Accept-Language"  = "en-GB,en;q=0.9"
-        "Accept-Encoding"  = if ($PSVersionTable.PSVersion.Major -ge 7) { "gzip, deflate" } else { "identity" }
         "Cache-Control"    = "no-cache"
     }
 
@@ -2363,10 +2424,11 @@ function Invoke-WebRequestWithRetry {
     $maxRedirects  = $Script:MaxRedirects
     $redirectsDone = 0
 
-    # PS7 HttpClient destroys the response object on redirect exceptions,
-    # so we can only intercept redirects manually on PS5.1.
-    # PS7 follows redirects natively; post-fetch SSRF check catches private IPs.
-    $maxRedirParam = if ($PSVersionTable.PSVersion.Major -ge 7) { $Script:MaxRedirects } else { 0 }
+    # Let Invoke-WebRequest handle normal HTTP redirects on every supported PowerShell version.
+    # Manual redirect interception through redirect exceptions is fragile and can surface as
+    # "Operation is not valid due to the current state of the object" on some hosts.
+    # Post-fetch SSRF validation below still blocks private/internal final destinations.
+    $maxRedirParam = $Script:MaxRedirects
 
     :redirectLoop while ($redirectsDone -lt $maxRedirects) {
 
@@ -2381,6 +2443,7 @@ function Invoke-WebRequestWithRetry {
                     -Uri $currentUrl `
                     -WebSession $session `
                     -Headers $headers `
+                    -UserAgent $UserAgent `
                     -UseBasicParsing `
                     -MaximumRedirection $maxRedirParam `
                     -TimeoutSec $Timeout `
@@ -2399,6 +2462,7 @@ function Invoke-WebRequestWithRetry {
                             -Uri $currentUrl `
                             -WebSession $session `
                             -Headers $headers `
+                            -UserAgent $UserAgent `
                             -UseBasicParsing `
                             -MaximumRedirection $maxRedirParam `
                             -TimeoutSec $Timeout `
@@ -2411,6 +2475,8 @@ function Invoke-WebRequestWithRetry {
                         }
                     }
                     catch {
+                        if (Test-IsCancellationException $_) { throw }
+
                         # Second fetch failed silently -- use first response
                         # Dispose the response trapped inside the exception
                         $excResponseProp = $_.Exception.PSObject.Properties['Response']
@@ -2447,8 +2513,30 @@ function Invoke-WebRequestWithRetry {
                 return $response
             }
             catch {
+                if (Test-IsCancellationException $_) { throw }
+
                 $lastError = $_
                 Write-Host "  Attempt $attempt failed: $($_.Exception.Message)"
+
+                if (Test-IsInvalidWebRequestStateError $_) {
+                    # A Ctrl+C/interrupted HTTP request or a fragile redirect response can leave
+                    # the web cmdlet/session in a bad state. Do not keep reusing that state.
+                    $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+                    if ($Proxy) {
+                        $proxyObj = [System.Net.WebProxy]::new($Proxy)
+                        $proxyUri = [uri]$Proxy
+                        if (-not [string]::IsNullOrWhiteSpace($proxyUri.UserInfo)) {
+                            $creds = $proxyUri.UserInfo -split ':', 2
+                            if ($creds.Count -eq 2) {
+                                $proxyObj.Credentials = [System.Net.NetworkCredential]::new(
+                                    [System.Net.WebUtility]::UrlDecode($creds[0]),
+                                    [System.Net.WebUtility]::UrlDecode($creds[1])
+                                )
+                            }
+                        }
+                        $session.Proxy = $proxyObj
+                    }
+                }
 
                 # Abort immediately for permanent HTTP errors that won't resolve
                 $responseObj = $null
@@ -3423,6 +3511,8 @@ try {
                     -Written $stats.Written -ErrorMsg ""
             }
             catch {
+                if (Test-IsCancellationException $_) { throw }
+
                 $totalFailed++
                 $errorMessage = $_.Exception.Message
                 Write-Host "  FAILED: $errorMessage"
@@ -3588,6 +3678,7 @@ try {
                     'Get-SafeAbsolutePath', 'Get-LinkKey', 'Normalize-Link',
                     'Decode-JsUrl', 'Invoke-WebRequestWithRetry',
                     'Get-LinksFromWebPage', 'Dispose-BaseResponseSafe',
+                    'Test-IsCancellationException', 'Test-IsInvalidWebRequestStateError',
                     'Test-IsPrivateUrl', 'Unwrap-SearchEngineLink'
                 )
                 $funcDefs = @{}
@@ -3690,6 +3781,8 @@ try {
                         }
                     }
                     catch {
+                        if (Test-IsCancellationException $_) { throw }
+
                         Write-Host "[parallel] FAILED: $url -- $($_.Exception.Message)"
 
                         [pscustomobject]@{
@@ -3742,7 +3835,7 @@ try {
                         }
                     }
 
-                    if ($ProgressFile -and $completedSourceSet) {
+                    if ($r.Status -eq "OK" -and $ProgressFile -and $completedSourceSet) {
                         Add-CompletedProgress `
                             -Path $ProgressFile `
                             -Url $r.Url `
@@ -3750,6 +3843,8 @@ try {
                     }
                     }
                     catch {
+                        if (Test-IsCancellationException $_) { throw }
+
                         $totalFailed++
                         $safeErrMsg = $_.Exception.Message
                         Write-Host "  ERROR processing result for $($r.Url): $safeErrMsg"
@@ -3776,6 +3871,7 @@ try {
                 $index = 0
                 foreach ($url in $urls) {
                     $index++
+                    $markProgressForUrl = $false
                     Write-Host "[$index / $($urls.Count)] Fetching: $url"
 
                     try {
@@ -3800,8 +3896,12 @@ try {
                             -Extracted $links.Count -Matched $stats.Matched `
                             -Excluded $stats.Excluded -Blacklisted $stats.Blacklisted -Duplicates $stats.Duplicates `
                             -Written $stats.Written -ErrorMsg ""
+
+                        $markProgressForUrl = $true
                     }
                     catch {
+                        if (Test-IsCancellationException $_) { throw }
+
                         $totalFailed++
                         $errorMessage = $_.Exception.Message
 
@@ -3820,7 +3920,7 @@ try {
                         }
                     }
 
-                    if ($ProgressFile -and $completedSourceSet) {
+                    if ($markProgressForUrl -and $ProgressFile -and $completedSourceSet) {
                         Add-CompletedProgress `
                             -Path $ProgressFile `
                             -Url $url `
@@ -3842,11 +3942,17 @@ try {
         throw "Unsupported SourceType: $SourceType"
     }
 
-    # Clean up progress file after a normal completed run
+    # Clean up progress file only after a fully successful completed run.
+    # If any URL failed, keep the progress file so -Resume can retry only the unfinished/failed URLs.
     if ($SourceType -eq "File" -and $ProgressFile -and (Test-Path -LiteralPath $ProgressFile)) {
-        Remove-ProgressFileIfSafe `
-            -Path $ProgressFile `
-            -Reason "Run completed normally."
+        if ($totalFailed -eq 0) {
+            Remove-ProgressFileIfSafe `
+                -Path $ProgressFile `
+                -Reason "Run completed normally."
+        }
+        else {
+            Write-Host "Progress file kept because $totalFailed URL(s) failed. Re-run with -Resume to retry unfinished URLs."
+        }
     }
 
     # Optional end-phase file maintenance after processing has finished.
@@ -3892,6 +3998,11 @@ try {
     }
 }
 catch {
+    if (Test-IsCancellationException $_) {
+        Write-Host "Interrupted by user. Progress file was kept if this was a File-mode run; re-run the same command with -Resume to continue."
+        exit 130
+    }
+
     Write-Error "Failed: $($_.Exception.Message)"
     exit 1
 }
