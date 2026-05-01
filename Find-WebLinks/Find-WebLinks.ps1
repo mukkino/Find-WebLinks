@@ -1732,6 +1732,70 @@ function Write-FileLinesWithRetry {
     }
 }
 
+function Remove-MaintenanceTempFile {
+    param(
+        [Parameter(Mandatory=$false)]
+        [AllowNull()]
+        [string]$TempFile,
+
+        [Parameter(Mandatory=$false)]
+        [string]$Reason = "maintenance temp file"
+    )
+
+    if ([string]::IsNullOrWhiteSpace($TempFile)) { return }
+
+    try {
+        if ([System.IO.File]::Exists($TempFile)) {
+            Remove-Item -LiteralPath $TempFile -Force -ErrorAction Stop
+            Write-Host "Removed ${Reason}: $TempFile"
+        }
+    }
+    catch {
+        Write-Warning "Could not remove ${Reason}: $TempFile. $($_.Exception.Message)"
+    }
+}
+
+function Remove-StaleMaintenanceTempFiles {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string[]]$BaseFiles,
+
+        [Parameter(Mandatory=$false)]
+        [ValidateRange(1, 2147483647)]
+        [int]$OlderThanMinutes = 60
+    )
+
+    $cutoff = (Get-Date).AddMinutes(-$OlderThanMinutes)
+    $seenBaseFiles = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+
+    foreach ($baseFile in $BaseFiles) {
+        if ([string]::IsNullOrWhiteSpace($baseFile)) { continue }
+
+        $safeBaseFile = Get-SafeAbsolutePath $baseFile
+        if (-not $seenBaseFiles.Add($safeBaseFile)) { continue }
+
+        $folder = Split-Path -Parent $safeBaseFile
+        $name = Split-Path -Leaf $safeBaseFile
+
+        if ([string]::IsNullOrWhiteSpace($folder) -or [string]::IsNullOrWhiteSpace($name)) { continue }
+        if (-not [System.IO.Directory]::Exists($folder)) { continue }
+
+        $patterns = @(
+            "$name.*.dedup.tmp",
+            "$name.*.sort.tmp"
+        )
+
+        foreach ($pattern in $patterns) {
+            $staleFiles = @(Get-ChildItem -LiteralPath $folder -Filter $pattern -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.LastWriteTime -lt $cutoff })
+
+            foreach ($staleFile in $staleFiles) {
+                Remove-MaintenanceTempFile -TempFile $staleFile.FullName -Reason "stale maintenance temp file"
+            }
+        }
+    }
+}
+
 function Remove-FileDuplicatesFast {
     param(
         [Parameter(Mandatory=$true)]
@@ -1762,6 +1826,7 @@ function Remove-FileDuplicatesFast {
 
     Write-Host "Deduplicating file: $safePath"
 
+    $writeSucceeded = $false
     try {
         $reader = [System.IO.StreamReader]::new($safePath, [System.Text.Encoding]::UTF8)
         $writer = [System.IO.StreamWriter]::new($tempFile, $false, [System.Text.Encoding]::UTF8)
@@ -1796,24 +1861,40 @@ function Remove-FileDuplicatesFast {
             }
         }
 
+        $writeSucceeded = $true
         Write-Host "  Kept: $linesKept | Removed: $duplicatesRemoved"
     }
     finally {
         if ($null -ne $reader) { $reader.Dispose() }
         if ($null -ne $writer) { $writer.Dispose() }
+
+        if (-not $writeSucceeded) {
+            Remove-MaintenanceTempFile -TempFile $tempFile -Reason "failed dedup temp file"
+        }
     }
 
-    for ($moveAttempt = 1; $moveAttempt -le $Script:FileMoveRetryCount; $moveAttempt++) {
-        try {
-            Move-Item -LiteralPath $tempFile -Destination $safePath -Force
-            break
-        } catch {
-            if ($moveAttempt -eq $Script:FileMoveRetryCount) { throw }
-            if ($Script:FileMoveRetryDelayMs -gt 0) {
-                Start-Sleep -Milliseconds $Script:FileMoveRetryDelayMs
+    $moveSucceeded = $false
+    try {
+        for ($moveAttempt = 1; $moveAttempt -le $Script:FileMoveRetryCount; $moveAttempt++) {
+            try {
+                Move-Item -LiteralPath $tempFile -Destination $safePath -Force
+                $moveSucceeded = $true
+                break
+            } catch {
+                if ($moveAttempt -eq $Script:FileMoveRetryCount) { throw }
+                if ($Script:FileMoveRetryDelayMs -gt 0) {
+                    Start-Sleep -Milliseconds $Script:FileMoveRetryDelayMs
+                }
             }
         }
     }
+    catch {
+        if (-not $moveSucceeded) {
+            Remove-MaintenanceTempFile -TempFile $tempFile -Reason "failed dedup temp file"
+        }
+        throw
+    }
+
     Write-Host "Deduplication complete."
 }
 
@@ -1860,28 +1941,46 @@ function Sort-FileFast {
     }
 
     $tempFile = "$safePath.$PID.sort.tmp"
-    $writer = [System.IO.StreamWriter]::new($tempFile, $false, [System.Text.Encoding]::UTF8)
+    $writer = $null
+    $writeSucceeded = $false
     try {
+        $writer = [System.IO.StreamWriter]::new($tempFile, $false, [System.Text.Encoding]::UTF8)
         # Write comments first (preserve headers)
         foreach ($c in $comments) { $writer.WriteLine($c) }
         # Then sorted content
         foreach ($l in $lines) { $writer.WriteLine($l) }
+        $writeSucceeded = $true
     }
     finally {
-        $writer.Dispose()
+        if ($null -ne $writer) { $writer.Dispose() }
+
+        if (-not $writeSucceeded) {
+            Remove-MaintenanceTempFile -TempFile $tempFile -Reason "failed sort temp file"
+        }
     }
 
-    for ($moveAttempt = 1; $moveAttempt -le $Script:FileMoveRetryCount; $moveAttempt++) {
-        try {
-            Move-Item -LiteralPath $tempFile -Destination $safePath -Force
-            break
-        } catch {
-            if ($moveAttempt -eq $Script:FileMoveRetryCount) { throw }
-            if ($Script:FileMoveRetryDelayMs -gt 0) {
-                Start-Sleep -Milliseconds $Script:FileMoveRetryDelayMs
+    $moveSucceeded = $false
+    try {
+        for ($moveAttempt = 1; $moveAttempt -le $Script:FileMoveRetryCount; $moveAttempt++) {
+            try {
+                Move-Item -LiteralPath $tempFile -Destination $safePath -Force
+                $moveSucceeded = $true
+                break
+            } catch {
+                if ($moveAttempt -eq $Script:FileMoveRetryCount) { throw }
+                if ($Script:FileMoveRetryDelayMs -gt 0) {
+                    Start-Sleep -Milliseconds $Script:FileMoveRetryDelayMs
+                }
             }
         }
     }
+    catch {
+        if (-not $moveSucceeded) {
+            Remove-MaintenanceTempFile -TempFile $tempFile -Reason "failed sort temp file"
+        }
+        throw
+    }
+
     Write-Host "Sorted: $safePath ($SortDirection, $($lines.Count) lines)"
 }
 
@@ -1934,6 +2033,8 @@ function Invoke-FileMaintenance {
     )
 
     if (-not $Deduplicate -and -not $Sort) { return }
+
+    Remove-StaleMaintenanceTempFiles -BaseFiles $FilePath -OlderThanMinutes 60
 
     foreach ($file in @(Get-UniqueMaintenanceFiles -FilePath $FilePath)) {
         if (-not [System.IO.File]::Exists($file)) {
