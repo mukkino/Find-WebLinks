@@ -10,6 +10,16 @@ It is a raw-response extraction tool, not a browser. It does **not** execute Jav
 
 ---
 
+## Current version
+
+**Latest version:** `1.6.1`
+
+Version `1.6.1` is a maintenance reliability release. It keeps the same command-line behaviour as `1.6.0`, but improves cleanup around deduplication and sorting temporary files.
+
+Use this version if you use `-DeduplicateFiles`, `-DeduplicateWhen`, `-SortOutput`, `-SortWhen`, or standalone maintenance commands such as `-Command Deduplicate`, `-Command Sort`, or `-Command Maintain`.
+
+---
+
 ## Requirements
 
 - Windows PowerShell 5.1 or PowerShell 7+.
@@ -49,6 +59,7 @@ Find-WebLinks can:
 - Use independent append/new modes for output, CSV log, and failed URL files.
 - Process URL lists sequentially or in parallel.
 - Deduplicate and sort files before or after a scraping run.
+- Clean failed or stale maintenance temporary files created by deduplication and sorting.
 - Run standalone maintenance commands without fetching URLs.
 - Protect against dangerous file collisions.
 - Warn when failure rates are high.
@@ -954,6 +965,20 @@ or:
 -IgnoreMaintenanceLargeFileLimit
 ```
 
+
+### Temporary maintenance files are visible
+
+During deduplication and sorting, the script writes temporary files beside the file being maintained. Their names look like:
+
+```text
+download-now.txt.<PID>.dedup.tmp
+download-now.txt.<PID>.sort.tmp
+```
+
+Version `1.6.1` cleans these files automatically when a maintenance write or replace operation fails. It also removes stale maintenance temporary files older than 60 minutes before running a new maintenance pass.
+
+If a very old `.dedup.tmp` or `.sort.tmp` file remains after a crash, power loss, or manual termination, it is safe to delete it manually once the script is no longer running.
+
 ### Parallel mode fails
 
 Parallel mode requires PowerShell 7+.
@@ -965,6 +990,34 @@ $PSVersionTable.PSVersion
 ```
 
 If you are on Windows PowerShell 5.1, use the default sequential mode or install PowerShell 7+.
+
+---
+
+## Release notes
+
+### 1.6.1
+
+Maintenance reliability release.
+
+#### Fixed
+
+- Fixed a cleanup issue where temporary deduplication files such as `download-now.txt.<PID>.dedup.tmp` could remain after a failed or interrupted maintenance operation.
+- Fixed the equivalent cleanup path for temporary sorting files such as `download-now.txt.<PID>.sort.tmp`.
+- Fixed failed deduplication and sorting writes so their temporary files are removed instead of being left beside the original file.
+- Fixed failed replacement/move operations so temporary maintenance files are cleaned up when the final file replace does not complete.
+
+#### Improved
+
+- Added automatic cleanup of stale maintenance temporary files before running a new deduplication or sorting pass.
+- Added safe cleanup handling for temporary maintenance files without making cleanup failure crash the whole run.
+- Improved writer disposal safety in the sorting path.
+- Improved maintenance-phase resilience when a run is interrupted, cancelled, or fails part-way through.
+
+#### Changed
+
+- Updated script version from `1.6.0` to `1.6.1`.
+- No command-line parameter changes.
+- No change to link extraction, matching, blacklist, resume, logging, failed-URL tracking, or interactive-help behaviour.
 
 ---
 
