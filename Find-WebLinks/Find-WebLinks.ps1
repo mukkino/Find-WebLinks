@@ -1,6 +1,6 @@
 #requires -Version 5.1
 
-# Find-WebLinks.ps1 - 1.6.0
+# Find-WebLinks.ps1 - 1.6.1
 # Author: Fabio Lichinchi (mukka)
 # 
 # THE UNLICENSE
