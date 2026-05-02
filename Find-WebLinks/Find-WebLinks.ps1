@@ -3305,7 +3305,7 @@ function Invoke-WebRequestWithRetry {
                     if (-not $redirectUrl) {
                         Close-BaseResponseSafe $response
                         $response = $null
-                        throw "Invalid HTTP redirect target from $currentUrl: $rawLocation"
+                        throw "Invalid HTTP redirect target from ${currentUrl}: $rawLocation"
                     }
 
                     if (Test-IsPrivateUrl $redirectUrl) {
@@ -3468,7 +3468,7 @@ function Invoke-WebRequestWithRetry {
                                 $redirectUrl = ConvertTo-NormalizedLink -Link $rawLocation -BaseUri ([uri]$currentUrl)
                                 if (-not $redirectUrl) {
                                     Close-BaseResponseSafe $responseObj
-                                    throw "Invalid HTTP redirect target from $currentUrl: $rawLocation"
+                                    throw "Invalid HTTP redirect target from ${currentUrl}: $rawLocation"
                                 }
 
                                 if (Test-IsPrivateUrl $redirectUrl) {
