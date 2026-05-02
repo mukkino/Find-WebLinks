@@ -51,41 +51,56 @@
 # instead of attitude.
 # Thank you, and enjoy the code.
 
+# ==============================================================================
+# SCRIPT PARAMETERS
+# Defines all inputs for the script, including targets, patterns, limits, and modes.
+# ==============================================================================
 param(
+    # The target to scrape (URL) or the file containing a list of URLs
     [Parameter(Mandatory = $false, Position = 0)]
     [string]$Source,
 
+    # Primary string/wildcard to look for in extracted links
     [Parameter(Mandatory = $false, Position = 1)]
     [string]$SearchPattern,
 
+    # Multiple strings/wildcards to look for
     [Parameter(Mandatory = $false)]
     [string[]]$SearchPatterns,
 
+    # Dictates if ANY search pattern can match, or if ALL must match
     [Parameter(Mandatory = $false)]
     [ValidateSet("Any", "All")]
     [string]$SearchMode = "Any",
 
+    # Pattern used to reject links that matched the search criteria
     [Parameter(Mandatory = $false)]
     [string]$ExcludePattern,
 
+    # Multiple patterns used to reject links
     [Parameter(Mandatory = $false)]
     [string[]]$ExcludePatterns,
 
+    # Dictates if ANY exclude pattern triggers rejection, or if ALL must be present
     [Parameter(Mandatory = $false)]
     [ValidateSet("Any", "All")]
     [string]$ExcludeMode = "Any",
 
+    # Where to save the successfully matched links
     [Parameter(Mandatory = $false, Position = 2)]
     [string]$OutputFile,
 
+    # Append to existing file or overwrite/create New
     [Parameter(Mandatory = $false, Position = 3)]
     [ValidateSet("Append", "New")]
     [string]$Mode = "Append",
 
+    # Specifies whether the $Source is a direct URL or a File of URLs
     [Parameter(Mandatory = $false, Position = 4)]
     [ValidateSet("Url", "File")]
     [string]$SourceType = "Url",
 
+    # Network retry logic controls
     [Parameter(Mandatory = $false)]
     [ValidateRange(1, 2147483647)]
     [int]$RetryCount = 3,
@@ -98,10 +113,12 @@ param(
     [ValidateRange(1, 2147483647)]
     [int]$TimeoutSeconds = 120,
 
+    # Delay between fetching different URLs when processing a file list
     [Parameter(Mandatory = $false)]
     [ValidateRange(0, 2147483647)]
     [int]$DelaySeconds = 5,
 
+    # Fetches the same URL twice to bypass simple cookie-walls or anti-bot screens
     [Parameter(Mandatory = $false)]
     [bool]$SecondFetch = $true,
 
@@ -109,12 +126,15 @@ param(
     [ValidateRange(0, 2147483647)]
     [int]$SecondFetchWait = 5,
 
+    # Flag to retain duplicate links found on the SAME page
     [Parameter(Mandatory = $false)]
     [switch]$KeepDuplicates,
 
+    # Global dedup flag across output files
     [Parameter(Mandatory = $false)]
     [bool]$NoDuplicates = $true,
 
+    # File containing domains/URLs to ignore entirely
     [Parameter(Mandatory = $false)]
     [string[]]$BlacklistFile,
 
@@ -122,16 +142,20 @@ param(
     [ValidateSet("Input", "Output", "Both")]
     [string]$BlacklistScope = "Both",
 
+    # Multi-threading control (requires PowerShell 7+)
     [Parameter(Mandatory = $false)]
     [ValidateRange(1, 2147483647)]
     [int]$ThrottleLimit = 1,
 
+    # Continue an interrupted run using a progress file
     [Parameter(Mandatory = $false)]
     [switch]$Resume,
 
+    # Legacy cleanup flag
     [Parameter(Mandatory = $false)]
     [switch]$DeduplicateFiles,
 
+    # Include #anchor fragments when considering uniqueness
     [Parameter(Mandatory = $false)]
     [switch]$KeepFragments,
 
@@ -141,6 +165,7 @@ param(
     [Parameter(Mandatory = $false)]
     [bool]$SortOutput = $false,
 
+    # Determines main script action: fetch links, or just run file maintenance
     [Parameter(Mandatory = $false)]
     [ValidateSet("Run", "Deduplicate", "Sort", "Maintain")]
     [string]$Command = "Run",
@@ -161,9 +186,11 @@ param(
     [ValidateSet("None", "Start", "End", "Both")]
     [string]$SortWhen = "None",
 
+    # Disguises the script as a standard web browser
     [Parameter(Mandatory = $false)]
     [string]$UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
 
+    # File tracking paths
     [Parameter(Mandatory = $false)]
     [string]$ProgressFile,
 
@@ -182,8 +209,7 @@ param(
     [string]$FailedUrlMode = "Append",
 
     # Advanced operational limits. Defaults preserve existing behaviour.
-    # Set -MaintenanceLargeFileLimitMB 0, or use -IgnoreMaintenanceLargeFileLimit,
-    # to allow dedup/sort on files larger than the default safety limit.
+    # Prevents loading massive files into RAM during deduplication.
     [Parameter(Mandatory = $false)]
     [ValidateRange(0, 2147483647)]
     [int]$MaintenanceLargeFileLimitMB = 1024,
@@ -191,10 +217,12 @@ param(
     [Parameter(Mandatory = $false)]
     [switch]$IgnoreMaintenanceLargeFileLimit,
 
+    # Protects memory against infinitely large web page payloads
     [Parameter(Mandatory = $false)]
     [ValidateRange(0, 2147483647)]
     [int]$MaxPageContentMB = 50,
 
+    # Regex protection against catastrophic backtracking
     [Parameter(Mandatory = $false)]
     [ValidateRange(0, 2147483647)]
     [int]$RegexTimeoutSeconds = 10,
@@ -203,6 +231,7 @@ param(
     [ValidateRange(0, 2147483647)]
     [int]$MaxUrlLength = 8192,
 
+    # Limits infinite redirect loops
     [Parameter(Mandatory = $false)]
     [ValidateRange(1, 2147483647)]
     [int]$MaxRedirects = 10,
@@ -211,6 +240,7 @@ param(
     [ValidateRange(0, 2147483647)]
     [int]$MaxRetryAfterSeconds = 300,
 
+    # I/O resilience for file operations
     [Parameter(Mandatory = $false)]
     [ValidateRange(1, 2147483647)]
     [int]$FileWriteRetryCount = 5,
@@ -244,6 +274,7 @@ param(
     [ValidateRange(0, 100)]
     [double]$HighFailureRatePercent = 50,
 
+    # Help triggers
     [Parameter(Mandatory = $false)]
     [Alias("h")]
     [switch]$Help,
@@ -253,8 +284,14 @@ param(
     [switch]$InteractiveHelp
 )
 
+# ==============================================================================
+# ENVIRONMENT SETUP
+# ==============================================================================
+# Enforce strict parsing rules to catch undeclared variables
 Set-StrictMode -Version Latest
+# Make all errors terminating so we can catch them cleanly
 $ErrorActionPreference = "Stop"
+# Suppress the visual progress bar which massively slows down Invoke-WebRequest
 $ProgressPreference = 'SilentlyContinue'
 
 # Help-only flows (-Help, -InteractiveHelp, or no parameters at all) should
@@ -262,10 +299,16 @@ $ProgressPreference = 'SilentlyContinue'
 # up-front and let downstream guardrails skip themselves.
 $Script:SkipOperationalValidation = $Help -or $InteractiveHelp -or ($PSBoundParameters.Count -eq 0)
 
+# Validate logical sequence of I/O retry limits
 if (-not $Script:SkipOperationalValidation -and $FileWriteRetryDelayMinMs -gt $FileWriteRetryDelayMaxMs) {
     throw "-FileWriteRetryDelayMinMs cannot be greater than -FileWriteRetryDelayMaxMs."
 }
 
+# ---------------------------------------------------------------------------
+# Function: Assert-OperationalGuardrail
+# Purpose: Prevents massive parameter typos from crashing the machine by 
+#          throwing an error if a parameter exceeds a safe hardcoded limit.
+# ---------------------------------------------------------------------------
 function Assert-OperationalGuardrail {
     param(
         [Parameter(Mandatory = $true)]
@@ -310,6 +353,7 @@ if ($AllowExtremeOperationalValues) {
     Write-Warning "Extreme operational value guardrails are disabled for this run. Make sure these values are intentional."
 }
 
+# Configure .NET network defaults for higher throughput and modern security
 [System.Net.ServicePointManager]::DefaultConnectionLimit = $ConnectionLimit
 # Enforce TLS 1.2+ for modern HTTPS sites (PS 5.1 defaults to TLS 1.0 on older systems)
 [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12
@@ -359,6 +403,10 @@ else {
     [TimeSpan]::FromSeconds($RegexTimeoutSeconds)
 }
 
+# ---------------------------------------------------------------------------
+# Function: Show-Usage
+# Purpose: Prints the help menu to the console.
+# ---------------------------------------------------------------------------
 function Show-Usage {
     Write-Host ""
     Write-Host "Usage:"
@@ -557,6 +605,12 @@ function Show-Usage {
     Write-Host "  fully eliminated in a standalone PowerShell HTTP client."
     Write-Host ""
 }
+
+# ---------------------------------------------------------------------------
+# Functions: Interactive CLI Builders
+# Purpose: These handle user prompts when the script is run with -InteractiveHelp
+#          They ensure strings are properly quoted and arrays are formatted.
+# ---------------------------------------------------------------------------
 function Format-PowerShellStringLiteral {
     param([AllowNull()][object]$Value)
 
@@ -582,17 +636,15 @@ function Format-PowerShellArrayLiteral {
     return ($items -join ",")
 }
 
+# The following Add-Command* functions build the argument strings piece by piece.
 function Add-CommandValue {
     param(
         [Parameter(Mandatory = $true)]
         [System.Collections.Generic.List[string]]$Parts,
-
         [Parameter(Mandatory = $true)]
         [string]$Name,
-
         [AllowNull()]
         [object]$Value,
-
         [switch]$Always
     )
 
@@ -616,10 +668,8 @@ function Add-CommandIntValue {
     param(
         [Parameter(Mandatory = $true)]
         [System.Collections.Generic.List[string]]$Parts,
-
         [Parameter(Mandatory = $true)]
         [string]$Name,
-
         [AllowNull()]
         [object]$Value
     )
@@ -633,10 +683,8 @@ function Add-CommandBoolValue {
     param(
         [Parameter(Mandatory = $true)]
         [System.Collections.Generic.List[string]]$Parts,
-
         [Parameter(Mandatory = $true)]
         [string]$Name,
-
         [AllowNull()]
         [object]$Value
     )
@@ -650,10 +698,8 @@ function Add-CommandSwitch {
     param(
         [Parameter(Mandatory = $true)]
         [System.Collections.Generic.List[string]]$Parts,
-
         [Parameter(Mandatory = $true)]
         [string]$Name,
-
         [AllowNull()]
         [object]$Enabled
     )
@@ -663,13 +709,13 @@ function Add-CommandSwitch {
     }
 }
 
+# The Read-Interactive* functions act as robust Wrappers around Read-Host,
+# forcing correct user input types (Text, Int, Yes/No, Menus).
 function Read-InteractiveText {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Prompt,
-
         [string]$Default = $null,
-
         [switch]$Required
     )
 
@@ -702,12 +748,9 @@ function Read-InteractiveInt {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Prompt,
-
         [AllowNull()]
         [object]$Default = $null,
-
         [int]$Minimum = 0,
-
         [int]$Maximum = 2147483647
     )
 
@@ -735,7 +778,6 @@ function Read-InteractiveYesNo {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Prompt,
-
         [bool]$Default = $false
     )
 
@@ -760,10 +802,8 @@ function Read-InteractiveChoice {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Prompt,
-
         [Parameter(Mandatory = $true)]
         [string[]]$Choices,
-
         [int]$DefaultIndex = 0
     )
 
@@ -815,17 +855,12 @@ function Convert-InteractiveList {
     )
 }
 
+# The Set-Optional* functions write the acquired values directly into a Settings hashtable.
 function Set-OptionalTextValue {
     param(
-        [Parameter(Mandatory = $true)]
-        [hashtable]$Settings,
-
-        [Parameter(Mandatory = $true)]
-        [string]$Name,
-
-        [Parameter(Mandatory = $true)]
-        [string]$Prompt,
-
+        [Parameter(Mandatory = $true)][hashtable]$Settings,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$Prompt,
         [string]$Default = $null
     )
 
@@ -837,20 +872,11 @@ function Set-OptionalTextValue {
 
 function Set-OptionalIntValue {
     param(
-        [Parameter(Mandatory = $true)]
-        [hashtable]$Settings,
-
-        [Parameter(Mandatory = $true)]
-        [string]$Name,
-
-        [Parameter(Mandatory = $true)]
-        [string]$Prompt,
-
-        [AllowNull()]
-        [object]$Default = $null,
-
+        [Parameter(Mandatory = $true)][hashtable]$Settings,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$Prompt,
+        [AllowNull()][object]$Default = $null,
         [int]$Minimum = 0,
-
         [int]$Maximum = 2147483647
     )
 
@@ -862,18 +888,10 @@ function Set-OptionalIntValue {
 
 function Set-OptionalChoiceValue {
     param(
-        [Parameter(Mandatory = $true)]
-        [hashtable]$Settings,
-
-        [Parameter(Mandatory = $true)]
-        [string]$Name,
-
-        [Parameter(Mandatory = $true)]
-        [string]$Prompt,
-
-        [Parameter(Mandatory = $true)]
-        [string[]]$Choices,
-
+        [Parameter(Mandatory = $true)][hashtable]$Settings,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$Prompt,
+        [Parameter(Mandatory = $true)][string[]]$Choices,
         [int]$DefaultIndex = 0
     )
 
@@ -885,15 +903,9 @@ function Set-OptionalChoiceValue {
 
 function Set-OptionalBoolValue {
     param(
-        [Parameter(Mandatory = $true)]
-        [hashtable]$Settings,
-
-        [Parameter(Mandatory = $true)]
-        [string]$Name,
-
-        [Parameter(Mandatory = $true)]
-        [string]$Prompt,
-
+        [Parameter(Mandatory = $true)][hashtable]$Settings,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$Prompt,
         [bool]$Default = $false
     )
 
@@ -902,21 +914,19 @@ function Set-OptionalBoolValue {
 
 function Set-OptionalSwitchValue {
     param(
-        [Parameter(Mandatory = $true)]
-        [hashtable]$Settings,
-
-        [Parameter(Mandatory = $true)]
-        [string]$Name,
-
-        [Parameter(Mandatory = $true)]
-        [string]$Prompt,
-
+        [Parameter(Mandatory = $true)][hashtable]$Settings,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$Prompt,
         [bool]$Default = $false
     )
 
     $Settings[$Name] = (Read-InteractiveYesNo -Prompt $Prompt -Default $Default)
 }
 
+# ---------------------------------------------------------------------------
+# Function: Edit-RunOptionalSettings
+# Purpose: Navigates the interactive menus for advanced settings
+# ---------------------------------------------------------------------------
 function Edit-RunOptionalSettings {
     param(
         [Parameter(Mandatory = $true)]
@@ -1016,34 +1026,22 @@ function Edit-RunOptionalSettings {
     }
 }
 
+# ---------------------------------------------------------------------------
+# Functions: Command string generators (Interactive Mode)
+# Purpose: Compiles all the collected interactive answers into a final
+#          copy-pasteable PowerShell command line.
+# ---------------------------------------------------------------------------
 function New-RunCommandFromInteractiveAnswers {
     param(
-        [Parameter(Mandatory = $true)]
-        [string]$Source,
-
-        [Parameter(Mandatory = $true)]
-        [string[]]$SearchPatternsValue,
-
-        [Parameter(Mandatory = $true)]
-        [string]$SearchModeValue,
-
-        [AllowNull()]
-        [string[]]$ExcludePatternsValue,
-
-        [AllowNull()]
-        [string]$ExcludeModeValue,
-
-        [Parameter(Mandatory = $true)]
-        [string]$OutputFileValue,
-
-        [Parameter(Mandatory = $true)]
-        [string]$ModeValue,
-
-        [Parameter(Mandatory = $true)]
-        [string]$SourceTypeValue,
-
-        [Parameter(Mandatory = $true)]
-        [hashtable]$Settings
+        [Parameter(Mandatory = $true)][string]$Source,
+        [Parameter(Mandatory = $true)][string[]]$SearchPatternsValue,
+        [Parameter(Mandatory = $true)][string]$SearchModeValue,
+        [AllowNull()][string[]]$ExcludePatternsValue,
+        [AllowNull()][string]$ExcludeModeValue,
+        [Parameter(Mandatory = $true)][string]$OutputFileValue,
+        [Parameter(Mandatory = $true)][string]$ModeValue,
+        [Parameter(Mandatory = $true)][string]$SourceTypeValue,
+        [Parameter(Mandatory = $true)][hashtable]$Settings
     )
 
     $parts = New-Object System.Collections.Generic.List[string]
@@ -1076,6 +1074,7 @@ function New-RunCommandFromInteractiveAnswers {
     Add-CommandValue -Parts $parts -Name "Mode" -Value $ModeValue -Always
     Add-CommandValue -Parts $parts -Name "SourceType" -Value $SourceTypeValue -Always
 
+    # Append standard string settings
     foreach ($name in @(
         "BlacklistScope", "LogMode", "FailedUrlMode", "SortDirection", "DeduplicateWhen", "SortWhen",
         "Proxy", "UserAgent", "ProgressFile", "LogCsv", "FailedUrlFile"
@@ -1085,12 +1084,14 @@ function New-RunCommandFromInteractiveAnswers {
         }
     }
 
+    # Append list settings
     foreach ($name in @("BlacklistFile")) {
         if ($Settings.ContainsKey($name)) {
             Add-CommandValue -Parts $parts -Name $name -Value $Settings[$name]
         }
     }
 
+    # Append Integer settings
     foreach ($name in @(
         "RetryCount", "WaitSeconds", "TimeoutSeconds", "DelaySeconds", "SecondFetchWait", "ThrottleLimit",
         "MaxRedirects", "MaxRetryAfterSeconds", "ConnectionLimit", "MaintenanceLargeFileLimitMB",
@@ -1103,12 +1104,14 @@ function New-RunCommandFromInteractiveAnswers {
         }
     }
 
+    # Append boolean settings
     foreach ($name in @("SecondFetch", "NoDuplicates", "SortOutput")) {
         if ($Settings.ContainsKey($name)) {
             Add-CommandBoolValue -Parts $parts -Name $name -Value $Settings[$name]
         }
     }
 
+    # Append Switch settings
     foreach ($name in @(
         "Resume", "KeepDuplicates", "DeduplicateFiles", "KeepFragments",
         "IgnoreMaintenanceLargeFileLimit", "AllowExtremeOperationalValues"
@@ -1181,14 +1184,9 @@ function Start-InteractiveRunCommandBuilder {
 
 function New-MaintenanceCommandFromInteractiveAnswers {
     param(
-        [Parameter(Mandatory = $true)]
-        [string]$CommandValue,
-
-        [Parameter(Mandatory = $true)]
-        [string[]]$FilesValue,
-
-        [Parameter(Mandatory = $true)]
-        [hashtable]$Settings
+        [Parameter(Mandatory = $true)][string]$CommandValue,
+        [Parameter(Mandatory = $true)][string[]]$FilesValue,
+        [Parameter(Mandatory = $true)][hashtable]$Settings
     )
 
     $parts = New-Object System.Collections.Generic.List[string]
@@ -1288,6 +1286,11 @@ function Start-InteractiveHelp {
     }
 }
 
+# ==============================================================================
+# SCRIPT ENTRY GATES
+# Checks if we should exit early to display help rather than running the engine
+# ==============================================================================
+
 if ($Help) {
     Show-Usage
     exit 0
@@ -1319,6 +1322,7 @@ if ($PSBoundParameters.Count -eq 0) {
     }
 }
 
+# Ensure required parameters are provided if we are doing a real run
 if ($Command -eq "Run" -and (
     [string]::IsNullOrWhiteSpace($Source) -or
     (
@@ -1335,9 +1339,11 @@ if ($Command -eq "Run" -and (
 }
 
 # ---------------------------------------------------------------------------
-# Helpers
+# CORE HELPERS
+# Path resolution, object disposal, and error identification
 # ---------------------------------------------------------------------------
 
+# Helper: Converts a relative path into an absolute file path robustly
 function Get-SafeAbsolutePath {
     param([string]$Path)
     if ([string]::IsNullOrWhiteSpace($Path)) { return $Path }
@@ -1345,6 +1351,7 @@ function Get-SafeAbsolutePath {
     return [System.IO.Path]::GetFullPath($unresolved)
 }
 
+# Helper: Disposes of WebRequest objects so memory leaks don't happen
 function Close-BaseResponseSafe {
     param([AllowNull()][object]$Response)
 
@@ -1385,6 +1392,7 @@ function Close-BaseResponseSafe {
     }
 }
 
+# Helper: Identifies if a task was manually cancelled (e.g., Ctrl+C)
 function Test-IsCancellationException {
     param([AllowNull()][object]$ErrorObject)
 
@@ -1419,6 +1427,7 @@ function Test-IsCancellationException {
     return $false
 }
 
+# Helper: Detects internal PowerShell Invoke-WebRequest state crashes
 function Test-IsInvalidWebRequestStateError {
     param([AllowNull()][object]$ErrorObject)
 
@@ -1448,6 +1457,11 @@ function Test-IsInvalidWebRequestStateError {
     return $false
 }
 
+# ---------------------------------------------------------------------------
+# PATTERN MATCHING & URL NORMALIZATION HELPERS
+# ---------------------------------------------------------------------------
+
+# Helper: Translates simple wildcard strings like "*sport*" to robust Regex "^.*sport.*$"
 function Convert-WildcardToRegex {
     param([string]$Pattern)
 
@@ -1546,8 +1560,12 @@ function Test-LinkMatchesExclude {
     return (Test-LinkMatchesSearch -Link $Link -RegexList $RegexList -Mode $Mode)
 }
 
-# Normalise a link for "same enough" duplicate comparison.
-# Strips fragment (#...) unless -KeepFragments is set, protocol, trailing slash, and lowercases.
+# ---------------------------------------------------------------------------
+# Function: Get-LinkKey
+# Purpose: Normalises a link for "same enough" duplicate comparison.
+#          Strips fragments (#...) unless told otherwise, removes HTTP/HTTPS 
+#          protocols so mixed-scheme URLs match, trims slashes, and lowercases.
+# ---------------------------------------------------------------------------
 function Get-LinkKey {
     param(
         [string]$Link,
@@ -1599,6 +1617,7 @@ function Get-LinkKey {
     }
 }
 
+# Helper: Formats the final URL string as it should appear written in the output text file
 function Get-LinkWriteValue {
     param(
         [string]$Link,
@@ -1633,6 +1652,11 @@ function Get-LinkWriteValue {
     return $trimmed
 }
 
+# ---------------------------------------------------------------------------
+# RESUME & PROGRESS HELPERS
+# Generates a fingerprint of the current run configuration to ensure a resumed
+# run is using the same settings (otherwise we might append the wrong data).
+# ---------------------------------------------------------------------------
 function Get-Sha256Text {
     param([string]$Text)
 
@@ -1647,6 +1671,9 @@ function Get-Sha256Text {
     }
 }
 
+# Function: Get-RunSignature
+# Purpose: Concatenates all crucial params (Search mode, blacklist files, output file)
+#          and hashes them so the resume progress file knows what job it belongs to.
 function Get-RunSignature {
     param(
         [string]$Source,
@@ -1699,6 +1726,9 @@ function Get-RunSignature {
     return Get-Sha256Text $signatureText
 }
 
+# Function: Initialize-ProgressFile
+# Purpose: Validates an existing progress file (for resume runs) to ensure it 
+#          matches the current Signature. Loads completed URLs into memory to skip.
 function Initialize-ProgressFile {
     param(
         [string]$Path,
@@ -1706,6 +1736,7 @@ function Initialize-ProgressFile {
         [switch]$Resume
     )
 
+    # Use ConcurrentDictionary for thread-safety in ThrottleLimit > 1 situations
     $completed = [System.Collections.Concurrent.ConcurrentDictionary[string, byte]]::new(
         [System.StringComparer]::OrdinalIgnoreCase
     )
@@ -1792,6 +1823,7 @@ function Initialize-ProgressFile {
     return $completed
 }
 
+# Add URL to tracker so if script dies, it doesn't scrape it again next run
 function Add-CompletedProgress {
     param(
         [string]$Path,
@@ -1835,6 +1867,10 @@ function Remove-ProgressFileIfSafe {
     }
 }
 
+# ---------------------------------------------------------------------------
+# I/O RETRY HELPERS (File Operations)
+# Purpose: Prevent fatal crashes just because an antivirus locked a file for 100ms.
+# ---------------------------------------------------------------------------
 function Start-FileRetryDelay {
     param(
         [int]$MinimumMilliseconds,
@@ -1896,6 +1932,11 @@ function Write-FileLinesWithRetry {
     }
 }
 
+# ---------------------------------------------------------------------------
+# MAINTENANCE FUNCTIONS (Sorting & Deduplication)
+# Purpose: Cleans up source files, blacklists, or output files either pre-run,
+#          post-run, or via standalone script call.
+# ---------------------------------------------------------------------------
 function Remove-MaintenanceTempFile {
     param(
         [Parameter(Mandatory=$false)]
@@ -1936,6 +1977,7 @@ function Test-ProcessIdIsRunning {
     }
 }
 
+# Helper: Finds old PID-locked `.tmp` files from crashed runs and clears them
 function Remove-StaleMaintenanceTempFiles {
     param(
         [Parameter(Mandatory=$true)]
@@ -2004,6 +2046,9 @@ function Remove-StaleMaintenanceTempFiles {
     }
 }
 
+# Function: Remove-FileDuplicatesFast
+# Purpose: Reads a file line-by-line, tracks seen URL keys in memory, and writes
+#          unique entries to a temporary `.tmp` file, then replaces the original.
 function Remove-FileDuplicatesFast {
     param(
         [Parameter(Mandatory=$true)]
@@ -2109,6 +2154,8 @@ function Remove-FileDuplicatesFast {
     Write-Host "Deduplication complete."
 }
 
+# Function: Sort-FileFast
+# Purpose: Uses memory arrays to alphabetize files efficiently (skipping huge ones)
 function Sort-FileFast {
     param(
         [Parameter(Mandatory=$true)]
@@ -2234,6 +2281,7 @@ function Test-MaintenancePhaseEnabled {
     return ($When -eq $Phase -or $When -eq "Both")
 }
 
+# Helper wrapper connecting dedupe/sort together into one pass
 function Invoke-FileMaintenance {
     param(
         [Parameter(Mandatory=$true)]
@@ -2369,6 +2417,11 @@ function Invoke-ProcessingMaintenancePhase {
     Write-Host ""
 }
 
+# ---------------------------------------------------------------------------
+# SSRF PROTECTION & DNS SECURITY
+# Purpose: Ensures the script won't scrape an internal LAN IP (e.g. 192.168.x.x)
+#          or localhost, acting as a blind proxy for attackers.
+# ---------------------------------------------------------------------------
 # #36: Check if an IP/URL targets a private/internal network (SSRF protection)
 function Test-IsPrivateIPAddress {
     param([System.Net.IPAddress]$IPAddress)
@@ -2661,6 +2714,11 @@ function Limit-NormalizedLinkLength {
     return $Link
 }
 
+# ---------------------------------------------------------------------------
+# Function: ConvertTo-NormalizedLink
+# Purpose: The core sanitizer. Takes extremely messy strings found in raw HTML 
+#          and turns them into perfectly formatted HTTP/HTTPS links (or null).
+# ---------------------------------------------------------------------------
 function ConvertTo-NormalizedLink {
     param(
         [string]$Link,
@@ -2723,7 +2781,7 @@ function ConvertTo-NormalizedLink {
         return $null
     }
 
-    # Protocol-relative
+    # Protocol-relative (e.g., //example.com/script.js)
     if ($link -match '^//') {
         $candidate = if ($null -ne $BaseUri) { "$($BaseUri.Scheme):$link" } else { "https:$link" }
         return (ConvertTo-NormalizedLink -Link $candidate)
@@ -2753,7 +2811,7 @@ function ConvertTo-NormalizedLink {
         return (ConvertTo-NormalizedLink -Link "https://$link")
     }
 
-    # Relative link
+    # Relative link (e.g. /path/to/page.html)
     if ($null -ne $BaseUri) {
         try {
             $absolute = [uri]::new($BaseUri, $link)
@@ -2800,16 +2858,26 @@ function Test-IsBlacklisted {
 
 # ---------------------------------------------------------------------------
 # Invoke-WebRequestWithRetry
-#   - Retries up to $MaxRetries times on failure
-#   - Waits $WaitSec between each retry attempt
-#   - Uses a WebRequestSession to accumulate cookies across redirects
-#   - Follows <meta http-equiv="refresh"> redirects
+#   - Retries up to $MaxRetries times on failure, with $WaitSec between
+#     attempts. On 429/503 with Retry-After the server's wait is honoured up
+#     to $MaxRetryAfterSecondsValue.
+#   - Uses a WebRequestSession so cookies persist across redirects.
+#   - Sends every request with -MaximumRedirection 0 and follows redirects
+#     manually so each Location target can be SSRF-validated against
+#     Test-IsPrivateUrl before another network call. Honours both HTTP 3xx
+#     redirects and <meta http-equiv="refresh"> redirects.
+#   - On PS 5.1 the cmdlet throws InvalidOperationException with FQEID
+#     MaximumRedirectExceeded on a 3xx and discards the response object,
+#     so when that FQEID is detected the redirect target is recovered
+#     through Get-RedirectTargetViaRawRequest (raw HttpWebRequest) and the
+#     same SSRF validation is applied. See that function for details.
 #   - When $DoSecondFetch is true, silently fetches the page a second time
-#     (after $SecondWait seconds) using the same session and keeps whichever
-#     response is larger. This helps with cookie-walls and session-gated
-#     pages. It does NOT execute JavaScript or wait for client-side rendering.
+#     after $SecondWait seconds using the same session, and keeps the larger
+#     response only if its media type is also text-like (so a binary second
+#     response cannot displace a valid HTML first response). This helps
+#     with cookie-walls and session-gated pages. It does NOT execute
+#     JavaScript or wait for client-side rendering.
 # ---------------------------------------------------------------------------
-
 
 function Test-IsRegexTimeoutException {
     param([AllowNull()][object]$ErrorObject)
@@ -3320,6 +3388,12 @@ function Get-ResponseContentLengthSafe {
     }
 }
 
+# ---------------------------------------------------------------------------
+# Function: Invoke-WebRequestWithRetry
+# Purpose: The core HTTP engine. Handles resilient fetching, parsing timeouts, 
+#          following redirects manually (to run SSRF checks on the target), 
+#          and bypassing anti-bot measures through silent second fetching.
+# ---------------------------------------------------------------------------
 function Invoke-WebRequestWithRetry {
     param(
         [string]$Url,
@@ -3342,6 +3416,7 @@ function Invoke-WebRequestWithRetry {
         throw "Invalid URL: $Url"
     }
 
+    # Use a persistent session to store cookies (crucial for sites requiring sessions)
     $session = New-FindWebLinksRequestSession
 
     $headers = @{
@@ -3356,6 +3431,7 @@ function Invoke-WebRequestWithRetry {
     $redirectsDone = 0
     $response = $null
 
+    # Loop allows manual resolution of 3xx redirects
     :redirectLoop while ($true) {
         if (Test-IsPrivateUrl $currentUrl) {
             throw "SSRF Blocked: URL targets a private/internal network ($currentUrl)."
@@ -3600,6 +3676,7 @@ function Invoke-WebRequestWithRetry {
                     $statusCode = Get-ResponseStatusCode -Response $responseObj
 
                     if ($null -ne $statusCode) {
+                        # Fail permanently on hard blocks
                         if ($statusCode -in @(401, 403, 404, 410)) {
                             Close-BaseResponseSafe $responseObj
                             throw "Permanent HTTP $statusCode error. Aborting retries for $currentUrl."
@@ -3909,21 +3986,25 @@ function Get-LinksFromWebPage {
 }
 
 # ---------------------------------------------------------------------------
+# REGEX DEFINITIONS
 # Pre-compiled regexes for link extraction (compiled once, used per page)
 # ---------------------------------------------------------------------------
 $global:CompiledRegexOptions = [System.Text.RegularExpressions.RegexOptions]::Compiled -bor [System.Text.RegularExpressions.RegexOptions]::IgnoreCase -bor [System.Text.RegularExpressions.RegexOptions]::ExplicitCapture
 $global:RegexTimeout = $Script:RegexTimeout
 
+# Matches standard attributes like href="", src="", data-url=""
 $global:RegexAttr = [regex]::new(
     '\b(?<attr>href|src|action|data-href|data-url|data-src|data-link|data-redirect|formaction|poster|srcset)\s*=\s*["''](?<url>[^"'']+)["'']',
     $global:CompiledRegexOptions, $global:RegexTimeout
 )
 
+# Matches unquoted attributes like href=https://example.com
 $global:RegexUnquotedAttr = [regex]::new(
     '\b(?<attr>href|src|action|data-href|data-url|data-src|data-link|data-redirect|formaction|poster|srcset)\s*=\s*(?<url>[^\s"''>]+)',
     $global:CompiledRegexOptions, $global:RegexTimeout
 )
 
+# Matches raw absolute URLs explicitly written in the HTML body
 $global:RegexRawUrl = [regex]::new(
     # The body of each domain alternative uses [a-z0-9.-]* (zero or more)
     # rather than + so that single-letter first labels like t.co, g.co, and
@@ -3995,7 +4076,7 @@ $global:RegexStyleImport = [regex]::new(
 )
 
 # ---------------------------------------------------------------------------
-# Main
+# MAIN EXECUTION AND FILTER PIPELINE
 # ---------------------------------------------------------------------------
 
 # Helper: filter, dedup, blacklist-check, and append links to the output file.
@@ -4141,6 +4222,9 @@ function Write-MatchedLinks {
     return $stats
 }
 
+# ==============================================================================
+# SCRIPT KICKOFF & MAIN TRY-CATCH BLOCK
+# ==============================================================================
 try {
     # Backward-compatible mapping for the old maintenance switches.
     # New explicit timing options win if both old and new parameters are supplied.
@@ -4204,6 +4288,7 @@ try {
         Write-Warning "-Files is ignored when -Command Run is used. Use -Command Deduplicate, Sort, or Maintain for standalone maintenance, or use -DeduplicateWhen/-SortWhen to maintain Source/OutputFile/BlacklistFile during a normal run."
     }
 
+    # Force append if we are resuming to prevent data loss 
     if ($Resume -and ($Mode -eq "New" -or $LogMode -eq "New" -or $FailedUrlMode -eq "New")) {
         Write-Host "Resume mode forces all output modes from New to Append to prevent data loss."
         $Mode = "Append"
@@ -4706,6 +4791,7 @@ try {
         }
     }
 
+    # Helper: Write failed URLs to error tracking file
     function Write-FailedUrlRow {
         param(
             [string]$Url,
@@ -5324,6 +5410,7 @@ try {
     Write-Host "Total duplicates:            $totalDupes"
     Write-Host "Total written to file:       $totalWritten"
     Write-Host "Total failed URLs:           $totalFailed"
+
     # #46: Warn if failure rate is suspiciously high
     if ($HighFailureRatePercent -gt 0 -and $SourceType -eq "File" -and $totalFailed -gt 0 -and $urls.Count -gt 0) {
         $failRate = [Math]::Round(($totalFailed / $urls.Count) * 100, 1)
