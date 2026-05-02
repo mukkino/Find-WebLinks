@@ -1745,13 +1745,13 @@ function Initialize-ProgressFile {
                 }
 
                 if (-not $signatureLine) {
-                    throw "Progress file exists but has no signature in the first 5 lines. Delete it or use a different -ProgressFile."
+                    throw "Progress file exists but has no signature in the first 5 lines: $Path. Delete it or use a different -ProgressFile."
                 }
 
                 $existingSignature = ($signatureLine -replace '^# Signature:\s*', '').Trim()
 
                 if ($existingSignature -ne $Signature) {
-                    throw "Progress file belongs to a different run configuration. The search, exclude, blacklist, source, or output settings changed. Delete the progress file to start a fresh run, or rerun with the original command."
+                    throw "Progress file belongs to a different run configuration: $Path. The search, exclude, blacklist, source, or output settings changed. Delete the progress file to start a fresh run, or rerun with the original command."
                 }
 
                 # Continue reading the rest of the file to populate the completed set
@@ -2944,6 +2944,100 @@ function New-FindWebLinksRequestSession {
     return (New-Object Microsoft.PowerShell.Commands.WebRequestSession)
 }
 
+# Recover the redirect target for a URL that PowerShell 5.1's Invoke-WebRequest
+# refuses to surface. PS 5.1 throws InvalidOperationException with FQEID
+# "MaximumRedirectExceeded" when a 3xx is returned under -MaximumRedirection 0,
+# and -- unlike PS 7+ -- it does NOT attach the response object to the
+# exception. The redirect's Location header is therefore unreachable through
+# the normal $_.Exception.Response path. This helper bypasses the cmdlet
+# entirely with a raw HttpWebRequest configured with AllowAutoRedirect=$false,
+# which returns the 3xx response cleanly so we can read the Location header
+# and validate the target before another network call.
+#
+# Returns @{StatusCode = <int>; Location = <string>} on success. Throws on
+# unrecoverable errors (network failure, invalid URL). The caller is expected
+# to fall through to normal retry logic if the helper throws or returns a
+# non-redirect status.
+function Get-RedirectTargetViaRawRequest {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$Url,
+        [Parameter(Mandatory = $true)][string]$UserAgent,
+        [AllowNull()][hashtable]$Headers,
+        [AllowNull()][object]$Session,
+        [Parameter(Mandatory = $true)][int]$TimeoutSec,
+        [AllowNull()][string]$ProxyUrl
+    )
+
+    $request = [System.Net.HttpWebRequest]::Create($Url)
+    $request.Method = 'GET'
+    $request.AllowAutoRedirect = $false
+    $request.UserAgent = $UserAgent
+    $request.Timeout = $TimeoutSec * 1000
+    $request.ReadWriteTimeout = $TimeoutSec * 1000
+
+    # Mirror the script's normal request headers. A handful of headers are
+    # restricted on HttpWebRequest and must be set via dedicated properties
+    # rather than through the Headers collection; the rest go through Add().
+    if ($null -ne $Headers) {
+        foreach ($key in @($Headers.Keys)) {
+            $valueStr = [string]$Headers[$key]
+            $keyLower = ([string]$key).ToLowerInvariant()
+            if     ($keyLower -eq 'accept')         { $request.Accept = $valueStr }
+            elseif ($keyLower -eq 'user-agent')     { } # already set on the property above
+            elseif ($keyLower -eq 'host')           { $request.Host = $valueStr }
+            elseif ($keyLower -eq 'referer')        { $request.Referer = $valueStr }
+            elseif ($keyLower -eq 'content-type')   { $request.ContentType = $valueStr }
+            elseif ($keyLower -eq 'connection')     { } # restricted; HttpWebRequest manages
+            elseif ($keyLower -eq 'content-length') { } # restricted; computed
+            else {
+                try { $request.Headers.Add([string]$key, $valueStr) }
+                catch { } # silently skip headers HttpWebRequest does not accept this way
+            }
+        }
+    }
+
+    # Reuse cookies from the script's WebRequestSession so cookie-walled
+    # redirects are followed with the same identity as the original request.
+    if ($null -ne $Session -and $null -ne $Session.Cookies) {
+        $request.CookieContainer = $Session.Cookies
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($ProxyUrl)) {
+        try {
+            $request.Proxy = New-Object System.Net.WebProxy ($ProxyUrl, $true)
+        }
+        catch { } # bad proxy URL falls back to default proxy resolution
+    }
+
+    $rawResponse = $null
+    try {
+        try {
+            $rawResponse = $request.GetResponse()
+        }
+        catch [System.Net.WebException] {
+            # 3xx/4xx/5xx responses raise WebException with the response attached.
+            # That is exactly what we want -- pull the response off the exception
+            # and continue. Only re-throw when there is no response to inspect.
+            if ($null -ne $_.Exception.Response) {
+                $rawResponse = $_.Exception.Response
+            } else {
+                throw
+            }
+        }
+
+        return [pscustomobject]@{
+            StatusCode = [int]$rawResponse.StatusCode
+            Location   = $rawResponse.Headers['Location']
+        }
+    }
+    finally {
+        if ($null -ne $rawResponse) {
+            try { $rawResponse.Close() } catch { }
+        }
+    }
+}
+
 function Get-FindWebLinksProxyParameters {
     param(
         [AllowNull()]
@@ -3438,6 +3532,60 @@ function Invoke-WebRequestWithRetry {
                 if ($null -ne $response) {
                     Close-BaseResponseSafe $response
                     $response = $null
+                }
+
+                # PowerShell 5.1's Invoke-WebRequest throws InvalidOperationException
+                # with FQEID "MaximumRedirectExceeded" when a 3xx response is returned
+                # under -MaximumRedirection 0, and crucially does NOT attach the
+                # response to the exception. That means $_.Exception.Response is
+                # $null, Get-ErrorResponse returns $null, and the script's regular
+                # 3xx-handling branch below never runs -- so the script retries the
+                # same URL forever. Detect this case by FQEID (which IS reliable
+                # across PS versions) and recover the redirect target with a raw
+                # HttpWebRequest. SSRF validation runs on the recovered target
+                # exactly as it does on the normal redirect path.
+                if ($_.FullyQualifiedErrorId -like 'MaximumRedirectExceeded*') {
+                    $fallback = $null
+                    try {
+                        $fallback = Get-RedirectTargetViaRawRequest `
+                            -Url $currentUrl `
+                            -UserAgent $UserAgentString `
+                            -Headers $headers `
+                            -Session $session `
+                            -TimeoutSec $Timeout `
+                            -ProxyUrl $ProxyUrl
+                    }
+                    catch {
+                        # Fallback itself failed (network error, DNS, etc.).
+                        # Fall through to normal retry rather than getting stuck.
+                        Write-Host "  Could not recover redirect target via fallback: $($_.Exception.Message)"
+                    }
+
+                    if ($null -ne $fallback `
+                        -and $null -ne $fallback.Location `
+                        -and $fallback.StatusCode -in @(301, 302, 303, 307, 308)) {
+
+                        if ($redirectsDone -ge $maxRedirects) {
+                            throw "Too many HTTP redirects (max $maxRedirects). Last URL: $currentUrl"
+                        }
+
+                        $rawLocation = [string]$fallback.Location
+                        $redirectUrl = ConvertTo-NormalizedLink -Link $rawLocation -BaseUri ([uri]$currentUrl)
+                        if (-not $redirectUrl) {
+                            throw "Invalid HTTP redirect target from ${currentUrl}: $rawLocation"
+                        }
+
+                        if (Test-IsPrivateUrl $redirectUrl) {
+                            throw "SSRF Blocked: Redirect targets private/internal network ($redirectUrl)."
+                        }
+
+                        Write-Host "  Following HTTP redirect -> $redirectUrl"
+                        $currentUrl = $redirectUrl
+                        $redirectsDone++
+                        continue redirectLoop
+                    }
+                    # Fallback didn't yield a usable redirect; fall through to
+                    # normal retry path below.
                 }
 
                 if (Test-IsInvalidWebRequestStateError $_) {
@@ -4842,7 +4990,7 @@ try {
                     'Get-LinksFromWebPage', 'Close-BaseResponseSafe',
                     'Test-IsCancellationException', 'Test-IsInvalidWebRequestStateError',
                     'Test-IsPrivateIPAddress', 'Test-IsPrivateUrl', 'Resolve-SearchEngineLink',
-                    'New-FindWebLinksRequestSession', 'Get-FindWebLinksProxyParameters',
+                    'New-FindWebLinksRequestSession', 'Get-RedirectTargetViaRawRequest', 'Get-FindWebLinksProxyParameters',
                     'Get-ResponseStatusCode', 'Get-ResponseHeaderValue',
                     'Get-ResponseMediaType', 'Test-IsSupportedTextMediaType',
                     'Get-ErrorResponse', 'Get-ResponseFinalUrl', 'Get-ResponseContentText', 'Get-ResponseContentLengthSafe',
